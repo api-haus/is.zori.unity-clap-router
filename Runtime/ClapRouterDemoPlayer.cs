@@ -1,0 +1,319 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Unity.Logging;
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+namespace Zori.ClapRouter
+{
+    using Random = UnityEngine.Random;
+
+    public enum DemoSongMode
+    {
+        MetronomeBeat = 0,
+        SeededEnsemble = 1
+    }
+
+    [RequireComponent(typeof(MusicRouterHost))]
+    public sealed class ClapRouterDemoPlayer : MonoBehaviour
+    {
+        [SerializeField] private MusicRouterHost host;
+        [SerializeField] private DemoSongMode songMode = DemoSongMode.MetronomeBeat;
+        [SerializeField] private int metronomeBpm = 120;
+        [SerializeField] private string sixSinesClapPath = "";
+        [SerializeField] private string svfClapPath = "";
+        [SerializeField] private string vitalClapPath = "";
+        [SerializeField] private string vitalPresetPath = "";
+        [SerializeField] private int seed = 20240617;
+        [SerializeField] private bool loop = true;
+        [SerializeField] private int leadNoteMs = 120;
+        [SerializeField] private InputActionReference keypressAction;
+
+        private const int SvfIndex = 13;
+        private const int GainIndex = 4;
+
+        private static readonly short[] LeadScale = { 79, 81, 84, 86, 88, 91, 93, 96 };
+
+        private MusicRouterSession _session;
+        private LiveSongScheduler _scheduler;
+        private readonly List<ClapRouterNodeRef> _inspectedNodes = new List<ClapRouterNodeRef>();
+        private readonly List<SongOnset> _songOnsets = new List<SongOnset>();
+        private int _leadTrack = -1;
+        private bool _ready;
+        private bool _failed;
+
+        public event Action<long, short, int> LeadNoteFired;
+
+        public MusicRouterSession Session => _ready ? _session : null;
+
+        public IReadOnlyList<ClapRouterNodeRef> InspectedNodes => _inspectedNodes;
+
+        public IReadOnlyList<SongOnset> SongOnsets => _songOnsets;
+
+        public long SongBaseFrame => _ready ? _scheduler.BaseFrame : 0;
+
+        public void SetParam(int track, int destSlot, uint paramId, double value)
+        {
+            if (_ready)
+            {
+                _scheduler.PushParam((long)_session.NowFrame, track, destSlot, paramId, value);
+            }
+        }
+
+        private void Awake()
+        {
+            if (host == null)
+            {
+                host = GetComponent<MusicRouterHost>();
+            }
+            ResolveContentPaths();
+        }
+
+        private void ResolveContentPaths()
+        {
+            sixSinesClapPath = ResolveClap(sixSinesClapPath, "six-sines");
+            svfClapPath = ResolveClap(svfClapPath, "clap-plugins");
+            vitalClapPath = ResolveClap(vitalClapPath, "vital");
+        }
+
+        private static string ResolveClap(string authored, string id)
+        {
+            return ClapRouterContent.TryGetClap(id, out string packed) ? packed : authored;
+        }
+
+        private void OnEnable()
+        {
+            keypressAction?.action?.Enable();
+        }
+
+        private void OnDisable()
+        {
+            keypressAction?.action?.Disable();
+
+            _ready = false;
+            _scheduler = null;
+            _session = null;
+        }
+
+        private void Update()
+        {
+            if (_failed)
+            {
+                return;
+            }
+
+            if (!_ready)
+            {
+                MusicRouterSession session = host != null ? host.Session : null;
+                if (session == null || !session.IsOpen)
+                {
+                    return;
+                }
+                TryBeginPlayback(session);
+                return;
+            }
+
+            _scheduler.PumpSong((long)_session.NowFrame);
+
+            InputAction action = keypressAction != null ? keypressAction.action : null;
+            if (action != null && action.WasPressedThisDynamicUpdate())
+            {
+                FireLeadNote();
+            }
+        }
+
+        private void FireLeadNote()
+        {
+            short key = LeadScale[Random.Range(0, LeadScale.Length)];
+            LeadNoteLog log = _scheduler.TriggerLead((long)_session.NowFrame, key);
+            LeadNoteFired?.Invoke(log.Stamp, log.Key, _leadTrack);
+            Log.Info($"[ClapRouterDemoPlayer] keypress -> lead note key={log.Key} id={log.NoteId} stamp={log.Stamp} now={log.NowFrame} lead={log.LeadFrames}f ({log.LeadMs:F1}ms scheduling) t={Time.realtimeSinceStartupAsDouble:F3}s. Audible latency adds host device output latency (see [clap-ipc][audio] OPEN latency).");
+        }
+
+        private void TryBeginPlayback(MusicRouterSession session)
+        {
+            if (songMode == DemoSongMode.MetronomeBeat)
+            {
+                BeginMetronomePlayback(session);
+            }
+            else
+            {
+                BeginEnsemblePlayback(session);
+            }
+        }
+
+        private void BeginMetronomePlayback(MusicRouterSession session)
+        {
+            if (!ClapExists(sixSinesClapPath, nameof(sixSinesClapPath), "SixSines.clap"))
+            {
+                _failed = true;
+                return;
+            }
+
+            int beat = session.CreateTrack();
+            if (beat < 0)
+            {
+                Log.Error("[ClapRouterDemoPlayer] host rejected track creation");
+                _failed = true;
+                return;
+            }
+            if (!Require("loadBeat", session.LoadInstrument(beat, sixSinesClapPath, 0)))
+            {
+                _failed = true;
+                return;
+            }
+            session.SetTrackGain(beat, 1.0f);
+
+            MetronomeComposer composer =
+                new MetronomeComposer(beat, (int)session.SampleRate, bpm: metronomeBpm);
+            Composition composition = composer.Compose();
+
+            _songOnsets.Clear();
+            foreach (MrEvent ev in composition.Events)
+            {
+                if (ev.Kind == MrEventKind.NoteOn)
+                {
+                    _songOnsets.Add(new SongOnset(ev.SampleTime, ev.Note.Key, ev.TrackId));
+                }
+            }
+            _leadTrack = beat;
+
+            long leadFrames = (long)leadNoteMs * session.SampleRate / 1000;
+            _scheduler = new LiveSongScheduler(session, composition, beat, session.LookaheadFrames,
+                leadFrames, loop);
+            _session = session;
+            _scheduler.Begin((long)session.NowFrame);
+
+            _inspectedNodes.Clear();
+            _inspectedNodes.Add(new ClapRouterNodeRef(beat, (int)MrDest.Instrument, "Beat"));
+
+            _ready = true;
+
+            Log.Info($"[ClapRouterDemoPlayer] metronome diagnostic: one voice (track={beat}), {metronomeBpm} BPM quarter notes ({composer.StepFrames} frames/beat), sr={session.SampleRate} lookahead={session.LookaheadFrames} loop={loop}. Circle closure must land exactly on every tick.");
+        }
+
+        private void BeginEnsemblePlayback(MusicRouterSession session)
+        {
+            if (!ClapExists(sixSinesClapPath, nameof(sixSinesClapPath), "SixSines.clap")
+                || !ClapExists(svfClapPath, nameof(svfClapPath), "ClapPlugins.clap"))
+            {
+                _failed = true;
+                return;
+            }
+
+            int bass = session.CreateTrack();
+            int keys = session.CreateTrack();
+            int perc = session.CreateTrack();
+            int lead = session.CreateTrack();
+            if (bass < 0 || keys < 0 || perc < 0 || lead < 0)
+            {
+                Log.Error("[ClapRouterDemoPlayer] host rejected track creation");
+                _failed = true;
+                return;
+            }
+
+            if (!Require("loadBass", session.LoadInstrument(bass, sixSinesClapPath, 0))
+                || !Require("loadKeys", session.LoadInstrument(keys, sixSinesClapPath, 0))
+                || !Require("loadPerc", session.LoadInstrument(perc, sixSinesClapPath, 0))
+                || !Require("loadLead", session.LoadInstrument(lead, sixSinesClapPath, 0)))
+            {
+                _failed = true;
+                return;
+            }
+
+            if (!Require("svfBass", session.InsertEffect(bass, 0, svfClapPath, SvfIndex))
+                || !Require("gainBass", session.InsertEffect(bass, 1, svfClapPath, GainIndex))
+                || !Require("svfKeys", session.InsertEffect(keys, 0, svfClapPath, SvfIndex))
+                || !Require("svfPerc", session.InsertEffect(perc, 0, svfClapPath, SvfIndex)))
+            {
+                _failed = true;
+                return;
+            }
+
+            session.SetTrackGain(bass, 1.0f);
+            session.SetTrackGain(keys, 0.95f);
+            session.SetTrackGain(perc, 0.85f);
+            session.SetTrackGain(lead, 1.0f);
+
+            int vital = TryLoadVital(session);
+
+            SeededComposer composer =
+                new SeededComposer(seed, bass, keys, perc, effectSlot: 0, sampleRate: (int)session.SampleRate);
+            Composition composition = composer.Compose();
+
+            _songOnsets.Clear();
+            foreach (MrEvent ev in composition.Events)
+            {
+                if (ev.Kind == MrEventKind.NoteOn)
+                {
+                    _songOnsets.Add(new SongOnset(ev.SampleTime, ev.Note.Key, ev.TrackId));
+                }
+            }
+            _leadTrack = lead;
+
+            long leadFrames = (long)leadNoteMs * session.SampleRate / 1000;
+            _scheduler = new LiveSongScheduler(session, composition, lead, session.LookaheadFrames,
+                leadFrames, loop);
+            _session = session;
+            _scheduler.Begin((long)session.NowFrame);
+
+            _inspectedNodes.Clear();
+            _inspectedNodes.Add(new ClapRouterNodeRef(bass, (int)MrDest.Instrument, "Bass"));
+            _inspectedNodes.Add(new ClapRouterNodeRef(keys, (int)MrDest.Instrument, "Keys"));
+            _inspectedNodes.Add(new ClapRouterNodeRef(perc, (int)MrDest.Instrument, "Perc"));
+            _inspectedNodes.Add(new ClapRouterNodeRef(lead, (int)MrDest.Instrument, "Lead"));
+            if (vital >= 0)
+            {
+                _inspectedNodes.Add(new ClapRouterNodeRef(vital, (int)MrDest.Instrument, "Vital"));
+                _scheduler.PushSustainedNote((long)session.NowFrame, vital, 48, 0.6);
+            }
+
+            _ready = true;
+
+            bool haveAction = keypressAction != null && keypressAction.action != null;
+            Log.Info($"[ClapRouterDemoPlayer] streaming {composition.Events.Length} song events (bass={bass} keys={keys} perc={perc} lead={lead}) sr={session.SampleRate} lookahead={session.LookaheadFrames} (audio scheduled at now+lookahead) loop={loop}. {(haveAction ? "Press the mapped key to blip the lead instrument." : "keypressAction is NOT assigned — assign an InputActionReference to hear the keypress lead.")}");
+        }
+
+        private int TryLoadVital(MusicRouterSession session)
+        {
+            if (string.IsNullOrEmpty(vitalClapPath) || !(File.Exists(vitalClapPath) || Directory.Exists(vitalClapPath)))
+            {
+                return -1;
+            }
+
+            int vital = session.CreateTrack();
+            if (vital < 0 || !Require("loadVital", session.LoadInstrument(vital, vitalClapPath, 0)))
+            {
+                return -1;
+            }
+
+            session.SetTrackGain(vital, 0.7f);
+            if (!string.IsNullOrEmpty(vitalPresetPath) && File.Exists(vitalPresetPath))
+            {
+                Require("vitalPreset", session.LoadState(vital, (int)MrDest.Instrument, vitalPresetPath));
+            }
+            return vital;
+        }
+
+        private static bool ClapExists(string path, string field, string fixtureName)
+        {
+            if (!string.IsNullOrEmpty(path) && (File.Exists(path) || Directory.Exists(path)))
+            {
+                return true;
+            }
+            Log.Error($"[ClapRouterDemoPlayer] {field} is not set to an existing {fixtureName}. Point it at the built fixture (repo tests/fixtures/{fixtureName}). Current value: '{path}'.");
+            return false;
+        }
+
+        private static bool Require(string what, MrStatus status)
+        {
+            if (status == MrStatus.Ok)
+            {
+                return true;
+            }
+            Log.Error($"[ClapRouterDemoPlayer] graph op '{what}' returned {status.ToString()}");
+            return false;
+        }
+    }
+}

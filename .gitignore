@@ -1,0 +1,14 @@
+# Native client lib is a build output staged in from clap-ipc-client — gitignored, only the .meta is tracked
+Plugins/**/*.so
+Plugins/**/*.dll
+Plugins/**/*.dylib
+Plugins/**/*.a
+
+# Unity generated project state
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Ll]ogs/
+[Bb]uild/
+*.csproj
+*.sln

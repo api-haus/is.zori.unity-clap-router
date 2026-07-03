@@ -1,0 +1,13 @@
+{
+  "name": "is.zori.unity-clap-router",
+  "displayName": "[Zori] CLAP Router",
+  "version": "0.1.0",
+  "unity": "6000.4",
+  "description": "C# P/Invoke bindings and Unity surface over the clap-ipc-client C ABI. Drives a CLAP plugin host across an arm's-length IPC seam: a blittable MrEvent mirror, the MusicRouterSession conductor surface (graph control + realtime event push), a seeded composer, and the PlayMode batchmode demo gate. Links zero CLAP/GPL code.",
+  "dependencies": {
+    "com.unity.test-framework": "1.6.0",
+    "com.unity.inputsystem": "1.19.0",
+    "com.unity.logging": "1.4.0-exp.2"
+  },
+  "samples": []
+}
