@@ -1,0 +1,97 @@
+name: Build Native Plugins
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_ref:
+        description: 'clap-ipc-client tag/branch/SHA to build'
+        required: true
+        default: 'main'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-native.yml'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-latest
+            lib: libclap_ipc_client.so
+            dest: libclap_ipc_client.so
+            cmake_flags: ''
+          - platform: win-x86_64
+            os: windows-latest
+            lib: clap_ipc_client.dll
+            dest: clap_ipc_client.dll
+            cmake_flags: '-A x64'
+          - platform: macos
+            os: macos-latest
+            lib: libclap_ipc_client.dylib
+            dest: clap_ipc_client.dylib
+            cmake_flags: '-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0'
+
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout clap-ipc-client
+        uses: actions/checkout@v4
+        with:
+          repository: api-haus/clap-ipc-client
+          ref: ${{ inputs.client_ref || 'main' }}
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          f=$(find build -name '${{ matrix.lib }}' -type f | head -1)
+          if [ -z "$f" ]; then echo "no ${{ matrix.lib }} produced"; find build -name '*clap_ipc_client*'; exit 1; fi
+          cp "$f" "out/${{ matrix.dest }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clap-ipc-client-${{ matrix.platform }}
+          path: out/${{ matrix.dest }}
+
+  commit-binaries:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: clap-ipc-client-*
+
+      - name: Place binaries into Plugins
+        run: |
+          mkdir -p Plugins/linux-x86_64 Plugins/win-x86_64 Plugins/macos
+          cp artifacts/clap-ipc-client-linux-x86_64/libclap_ipc_client.so Plugins/linux-x86_64/libclap_ipc_client.so
+          cp artifacts/clap-ipc-client-win-x86_64/clap_ipc_client.dll     Plugins/win-x86_64/clap_ipc_client.dll
+          cp artifacts/clap-ipc-client-macos/clap_ipc_client.dylib        Plugins/macos/clap_ipc_client.dylib
+          echo "=== committed native layout ==="
+          find Plugins -type f ! -name '*.meta' | sort
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Plugins/
+          git diff --cached --quiet || git commit -m "build: cross-compiled clap_ipc_client native binaries"
+          git pull --rebase --autostash
+          git push

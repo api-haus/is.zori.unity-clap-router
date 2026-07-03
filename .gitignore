@@ -1,8 +1,5 @@
-# Native client lib is a build output staged in from clap-ipc-client — gitignored, only the .meta is tracked
-Plugins/**/*.so
-Plugins/**/*.dll
-Plugins/**/*.dylib
-Plugins/**/*.a
+# Native client libs (libclap_ipc_client.{so,dll,dylib}) are cross-compiled and committed
+# in-place by .github/workflows/build-native.yml — they are tracked, not ignored.
 
 # Unity generated project state
 [Ll]ibrary/
