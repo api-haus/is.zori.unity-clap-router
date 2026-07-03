@@ -10,9 +10,17 @@ namespace Zori.ClapRouter
         private readonly double _bpm;
         private readonly int _beats;
         private readonly short _key;
+        private readonly int _subdivision;
 
-        public MetronomeComposer(int track, int sampleRate = 48000, int blockSize = 512,
-            double bpm = 120.0, int beats = 16, short key = 84)
+        public MetronomeComposer(
+            int track,
+            int sampleRate = 48000,
+            int blockSize = 512,
+            double bpm = 120.0,
+            int beats = 16,
+            short key = 84,
+            int subdivision = 4
+        )
         {
             _track = track;
             _sampleRate = sampleRate;
@@ -20,9 +28,12 @@ namespace Zori.ClapRouter
             _bpm = bpm;
             _beats = beats;
             _key = key;
+            _subdivision = subdivision;
         }
 
         public long StepFrames => (long)System.Math.Round(_sampleRate * 60.0 / _bpm);
+
+        public BeatGrid Grid => new BeatGrid(_sampleRate, _bpm, _subdivision);
 
         public Composition Compose()
         {
@@ -31,8 +42,15 @@ namespace Zori.ClapRouter
             long totalFrames = step * _beats;
 
             List<MrEvent> events = new List<MrEvent>(2 + _beats * 2);
-            events.Add(MrEvent.ParamValue((ushort)_track, MrDest.Instrument, 0u,
-                SeededComposer.SixSinesMainLevelParam, 1.0));
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_track,
+                    MrDest.Instrument,
+                    0u,
+                    SeededComposer.SixSinesMainLevelParam,
+                    1.0
+                )
+            );
 
             for (int b = 0; b < _beats; b++)
             {
@@ -45,6 +63,7 @@ namespace Zori.ClapRouter
             return new Composition
             {
                 Events = events.ToArray(),
+                Grid = Grid,
                 SampleRate = _sampleRate,
                 BlockSize = _blockSize,
                 TotalBlocks = (int)((totalFrames + _blockSize - 1) / _blockSize),
@@ -54,7 +73,7 @@ namespace Zori.ClapRouter
                 PercTrack = _track,
                 EffectSlot = 0,
                 ExpectedNoteOnsets = _beats,
-                PreRollEndFrame = 0
+                PreRollEndFrame = 0,
             };
         }
     }

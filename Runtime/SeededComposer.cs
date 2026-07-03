@@ -16,6 +16,8 @@ namespace Zori.ClapRouter
     public sealed class Composition
     {
         public MrEvent[] Events;
+        public BeatGrid Grid;
+        public RhythmSequence Sequence;
         public int SampleRate;
         public int BlockSize;
         public int TotalBlocks;
@@ -81,9 +83,21 @@ namespace Zori.ClapRouter
         private readonly int _keysTrack;
         private readonly int _percTrack;
         private readonly int _effectSlot;
+        private readonly double _bpm;
+        private readonly int _subdivision;
 
-        public SeededComposer(int seed, int bassTrack, int keysTrack, int percTrack, int effectSlot = 0,
-            int sampleRate = 48000, int blockSize = 512, int totalBlocks = 512)
+        public SeededComposer(
+            int seed,
+            int bassTrack,
+            int keysTrack,
+            int percTrack,
+            int effectSlot = 0,
+            int sampleRate = 48000,
+            int blockSize = 512,
+            int totalBlocks = 512,
+            double bpm = 120.0,
+            int subdivision = 4
+        )
         {
             _seed = seed;
             _bassTrack = bassTrack;
@@ -93,11 +107,15 @@ namespace Zori.ClapRouter
             _sampleRate = sampleRate;
             _blockSize = blockSize;
             _totalBlocks = totalBlocks;
+            _bpm = bpm;
+            _subdivision = subdivision;
         }
 
         public Composition Compose()
         {
-            DeterministicRandom rng = new DeterministicRandom((ulong)(uint)_seed * 0x100000001B3UL + 0xCBF29CE484222325UL);
+            DeterministicRandom rng = new DeterministicRandom(
+                (ulong)(uint)_seed * 0x100000001B3UL + 0xCBF29CE484222325UL
+            );
             List<MrEvent> events = new List<MrEvent>(1024);
             int voice = 1;
 
@@ -135,6 +153,7 @@ namespace Zori.ClapRouter
             return new Composition
             {
                 Events = sorted,
+                Grid = new BeatGrid(_sampleRate, _bpm, _subdivision),
                 SampleRate = _sampleRate,
                 BlockSize = _blockSize,
                 TotalBlocks = _totalBlocks,
@@ -147,21 +166,63 @@ namespace Zori.ClapRouter
                 PreRollEndFrame = preRollEnd,
                 SampleAccuracy = g3,
                 PitchGlide = g4,
-                EffectSignature = g5
+                EffectSignature = g5,
             };
         }
 
         private void EmitVoicing(List<MrEvent> events)
         {
-            events.Add(MrEvent.ParamValue((ushort)_bassTrack, MrDest.Instrument, 0u, SixSinesMainLevelParam, 1.0));
-            events.Add(MrEvent.ParamValue((ushort)_keysTrack, MrDest.Instrument, 0u, SixSinesMainLevelParam, 0.85));
-            events.Add(MrEvent.ParamValue((ushort)_percTrack, MrDest.Instrument, 0u, SixSinesMainLevelParam, 0.9));
-            events.Add(MrEvent.ParamValue((ushort)_keysTrack, MrDest.Instrument, 0u, SixSinesFineTuningParam, 0.5));
-            events.Add(MrEvent.ParamValue((ushort)_keysTrack, (short)_effectSlot, 0u, SvfModeParam, 0.0));
-            events.Add(MrEvent.ParamValue((ushort)_keysTrack, (short)_effectSlot, 0u, SvfFreqParam, 1.0));
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_bassTrack,
+                    MrDest.Instrument,
+                    0u,
+                    SixSinesMainLevelParam,
+                    1.0
+                )
+            );
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_keysTrack,
+                    MrDest.Instrument,
+                    0u,
+                    SixSinesMainLevelParam,
+                    0.85
+                )
+            );
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_percTrack,
+                    MrDest.Instrument,
+                    0u,
+                    SixSinesMainLevelParam,
+                    0.9
+                )
+            );
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_keysTrack,
+                    MrDest.Instrument,
+                    0u,
+                    SixSinesFineTuningParam,
+                    0.5
+                )
+            );
+            events.Add(
+                MrEvent.ParamValue((ushort)_keysTrack, (short)_effectSlot, 0u, SvfModeParam, 0.0)
+            );
+            events.Add(
+                MrEvent.ParamValue((ushort)_keysTrack, (short)_effectSlot, 0u, SvfFreqParam, 1.0)
+            );
         }
 
-        private int EmitEnsemble(List<MrEvent> events, ref DeterministicRandom rng, ref int voice, long start, long end)
+        private int EmitEnsemble(
+            List<MrEvent> events,
+            ref DeterministicRandom rng,
+            ref int voice,
+            long start,
+            long end
+        )
         {
             int onsets = 0;
             long bassStep = _sampleRate / 2;
@@ -177,7 +238,9 @@ namespace Zori.ClapRouter
                 if (rng.NextDouble() < 0.5)
                 {
                     double bend = (rng.NextDouble() - 0.5) * 1.0;
-                    events.Add(MrEvent.PitchBend((ushort)_bassTrack, (uint)(t + dur / 2), id, bend));
+                    events.Add(
+                        MrEvent.PitchBend((ushort)_bassTrack, (uint)(t + dur / 2), id, bend)
+                    );
                 }
                 events.Add(MrEvent.NoteOff((ushort)_bassTrack, (uint)(t + dur), id, 0, 0, key));
                 onsets += 1;
@@ -196,7 +259,9 @@ namespace Zori.ClapRouter
                     events.Add(MrEvent.NoteOff((ushort)_keysTrack, (uint)(t + dur), id, 0, 0, key));
                     onsets += 1;
                 }
-                events.Add(MrEvent.PitchBend((ushort)_keysTrack, (uint)(t + dur / 2), chordVoice, 0.25));
+                events.Add(
+                    MrEvent.PitchBend((ushort)_keysTrack, (uint)(t + dur / 2), chordVoice, 0.25)
+                );
             }
 
             for (long t = start; t + percStep <= end; t += percStep)
@@ -212,8 +277,13 @@ namespace Zori.ClapRouter
             return onsets;
         }
 
-        private SoloWindow EmitPitchGlide(List<MrEvent> events, ref DeterministicRandom rng, ref int voice, long start,
-            long end)
+        private SoloWindow EmitPitchGlide(
+            List<MrEvent> events,
+            ref DeterministicRandom rng,
+            ref int voice,
+            long start,
+            long end
+        )
         {
             short key = 43;
             int id = voice++;
@@ -241,11 +311,16 @@ namespace Zori.ClapRouter
                 EndFrame = end,
                 OnsetFrame = onset,
                 ExpectedCents = targetCents,
-                Key = key
+                Key = key,
             };
         }
 
-        private SoloWindow EmitSampleAccuracy(List<MrEvent> events, ref int voice, long start, long end)
+        private SoloWindow EmitSampleAccuracy(
+            List<MrEvent> events,
+            ref int voice,
+            long start,
+            long end
+        )
         {
             short key = 84;
             int id = voice++;
@@ -262,21 +337,42 @@ namespace Zori.ClapRouter
                 EndFrame = end,
                 OnsetFrame = onset,
                 ExpectedCents = 0.0,
-                Key = key
+                Key = key,
             };
         }
 
-        private SoloWindow EmitEffectSignature(List<MrEvent> events, ref int voice, long start, long end)
+        private SoloWindow EmitEffectSignature(
+            List<MrEvent> events,
+            ref int voice,
+            long start,
+            long end
+        )
         {
             short key = 72;
             int id = voice++;
             long onset = start + _blockSize * 4;
             long release = end - _blockSize * 4;
 
-            events.Add(MrEvent.ParamValue((ushort)_keysTrack, (short)_effectSlot, (uint)start, SvfFreqParam, 0.15));
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_keysTrack,
+                    (short)_effectSlot,
+                    (uint)start,
+                    SvfFreqParam,
+                    0.15
+                )
+            );
             events.Add(MrEvent.NoteOn((ushort)_keysTrack, (uint)onset, id, 0, 0, key, 0.85));
             events.Add(MrEvent.NoteOff((ushort)_keysTrack, (uint)release, id, 0, 0, key));
-            events.Add(MrEvent.ParamValue((ushort)_keysTrack, (short)_effectSlot, (uint)end, SvfFreqParam, 1.0));
+            events.Add(
+                MrEvent.ParamValue(
+                    (ushort)_keysTrack,
+                    (short)_effectSlot,
+                    (uint)end,
+                    SvfFreqParam,
+                    1.0
+                )
+            );
 
             return new SoloWindow
             {
@@ -285,7 +381,7 @@ namespace Zori.ClapRouter
                 EndFrame = end,
                 OnsetFrame = onset,
                 ExpectedCents = 0.0,
-                Key = key
+                Key = key,
             };
         }
 
@@ -298,11 +394,14 @@ namespace Zori.ClapRouter
                 order[i] = i;
             }
 
-            Array.Sort(order, (a, b) =>
-            {
-                int c = arr[a].SampleTime.CompareTo(arr[b].SampleTime);
-                return c != 0 ? c : a.CompareTo(b);
-            });
+            Array.Sort(
+                order,
+                (a, b) =>
+                {
+                    int c = arr[a].SampleTime.CompareTo(arr[b].SampleTime);
+                    return c != 0 ? c : a.CompareTo(b);
+                }
+            );
 
             MrEvent[] sorted = new MrEvent[arr.Length];
             for (int i = 0; i < order.Length; i++)
