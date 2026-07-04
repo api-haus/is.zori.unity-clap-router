@@ -24,8 +24,8 @@ namespace Zori.ClapRouter
             double bpm,
             long originFrame,
             int beatsPerBar = 4,
-            short accentKey = 84,
-            short beatKey = 77,
+            short accentKey = 96,
+            short beatKey = 89,
             double clickSeconds = 0.05,
             float gain = 0.6f
         )
