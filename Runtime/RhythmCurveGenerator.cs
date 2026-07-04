@@ -13,6 +13,9 @@ namespace Zori.ClapRouter
         private readonly double _accel;
         private readonly double _damping;
         private readonly double _maxMutation;
+        private readonly double _restChance;
+        private readonly int _maxSixteenthRun;
+        private readonly int _maxRestRun;
 
         public RhythmCurveGenerator(
             int bars = 4,
@@ -22,7 +25,10 @@ namespace Zori.ClapRouter
             double maxFrequency = 4.0,
             double accel = 0.35,
             double damping = 0.8,
-            double maxMutation = 0.6
+            double maxMutation = 0.6,
+            double restChance = 0.4,
+            int maxSixteenthRun = 4,
+            int maxRestRun = 1
         )
         {
             _bars = bars < 1 ? 1 : bars;
@@ -33,6 +39,9 @@ namespace Zori.ClapRouter
             _accel = accel;
             _damping = damping;
             _maxMutation = maxMutation;
+            _restChance = restChance;
+            _maxSixteenthRun = maxSixteenthRun < 1 ? 1 : maxSixteenthRun;
+            _maxRestRun = maxRestRun < 1 ? 1 : maxRestRun;
         }
 
         public RhythmPattern Generate(ulong seed)
@@ -46,13 +55,36 @@ namespace Zori.ClapRouter
             double frequency = _startFrequency;
             double mutation = 0.0;
             int tick = NoteValues.TicksPerBeat;
+            int sixteenthRun = 0;
+            int restRun = 0;
+            bool first = true;
             int guard = spanBeats * 8;
 
             while (tick < totalTicks && guard-- > 0)
             {
                 NoteValue value = NearestSubdivision(frequency);
-                onsets.Add(tick);
-                values.Add(value);
+                if (value == NoteValue.Sixteenth && sixteenthRun >= _maxSixteenthRun)
+                {
+                    value = NoteValue.Eighth;
+                    frequency = Math.Min(frequency, 2.0);
+                    mutation = -Math.Abs(mutation);
+                }
+
+                bool rest = !first && restRun < _maxRestRun && rng.NextDouble() < _restChance;
+                if (rest)
+                {
+                    restRun++;
+                    sixteenthRun = 0;
+                }
+                else
+                {
+                    onsets.Add(tick);
+                    values.Add(value);
+                    restRun = 0;
+                    sixteenthRun = value == NoteValue.Sixteenth ? sixteenthRun + 1 : 0;
+                }
+                first = false;
+
                 tick += NoteValues.Ticks(value);
 
                 mutation += (rng.NextDouble() * 2.0 - 1.0) * _accel;

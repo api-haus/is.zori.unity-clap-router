@@ -9,5 +9,11 @@
     "com.unity.inputsystem": "1.19.0",
     "com.unity.logging": "1.4.0-exp.2"
   },
-  "samples": []
+  "samples": [
+    {
+      "displayName": "Rhythm Level",
+      "description": "A from-scratch Rhythm-Heaven-style level: a 2D-curve rhythm generator, on-grid pre/post tolerance judging, endless sheet regeneration, and the sheet visualizer, driven directly through the toolbox.",
+      "path": "Samples~/RhythmLevel"
+    }
+  ]
 }

@@ -17,7 +17,7 @@ namespace Zori.ClapRouter
     }
 
     [RequireComponent(typeof(MusicRouterHost))]
-    public sealed class ClapRouterDemoPlayer : MonoBehaviour
+    public sealed class ClapRouterDemoPlayer : MonoBehaviour, IRhythmSheetView
     {
         [SerializeField]
         private MusicRouterHost host;
@@ -33,6 +33,12 @@ namespace Zori.ClapRouter
 
         [SerializeField]
         private int rhythmBars = 4;
+
+        [SerializeField]
+        private double rhythmRestChance = 0.4;
+
+        [SerializeField]
+        private int rhythmMaxSixteenthRun = 4;
 
         [SerializeField]
         private double hitPreTolerance = 0.35;
@@ -267,7 +273,11 @@ namespace Zori.ClapRouter
 
         private Composition BuildRhythmSheet(int guide, MusicRouterSession session, int index)
         {
-            RhythmPattern pattern = new RhythmCurveGenerator(rhythmBars).Generate(SheetSeed(index));
+            RhythmPattern pattern = new RhythmCurveGenerator(
+                rhythmBars,
+                restChance: rhythmRestChance,
+                maxSixteenthRun: rhythmMaxSixteenthRun
+            ).Generate(SheetSeed(index));
             RhythmLevelComposer composer = new RhythmLevelComposer(
                 guide,
                 pattern,

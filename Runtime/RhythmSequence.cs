@@ -71,6 +71,8 @@ namespace Zori.ClapRouter
 
         public double FramesPerBeat => _beats > 0 ? (double)_span / _beats : _span;
 
+        public double SixteenthFrames => FramesPerBeat / 4.0;
+
         public double PreTolerance => _preTolerance;
 
         public double PostTolerance => _postTolerance;
@@ -82,17 +84,9 @@ namespace Zori.ClapRouter
         public long AbsoluteOnset(long loop, int index) =>
             _origin + loop * _span + _localOnsets[index];
 
-        public long PrevGap(int index)
-        {
-            int n = _localOnsets.Length;
-            return index > 0
-                ? _localOnsets[index] - _localOnsets[index - 1]
-                : _localOnsets[0] + _span - _localOnsets[n - 1];
-        }
+        public long PreWindowFrames => (long)(_preTolerance * SixteenthFrames);
 
-        public long PreWindowFrames(int index) => (long)(_preTolerance * PrevGap(index));
-
-        public long PostWindowFrames(int index) => (long)(_postTolerance * PrevGap(index));
+        public long PostWindowFrames => (long)(_postTolerance * SixteenthFrames);
 
         public RhythmSequence WithOrigin(long origin) =>
             new RhythmSequence(
@@ -137,11 +131,11 @@ namespace Zori.ClapRouter
 
             long upcoming = baseAbs + nextLocal;
             long passed = baseAbs + prevLocal;
-            long interval = upcoming - passed;
             long distToPassed = judgeFrame - passed;
             long distToUpcoming = upcoming - judgeFrame;
-            double postEdge = _postTolerance * PrevGap(prevIndex);
-            double preEdge = _preTolerance * interval;
+            double sixteenth = SixteenthFrames;
+            double postEdge = _postTolerance * sixteenth;
+            double preEdge = _preTolerance * sixteenth;
             bool inPost = distToPassed <= postEdge;
             bool inPre = distToUpcoming <= preEdge;
 

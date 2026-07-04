@@ -1,25 +1,39 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Zori.ClapRouter
 {
     public sealed class RhythmSheetVisualizer : MonoBehaviour
     {
+        [Tooltip(
+            "Component that drives the sheet (an IRhythmSheetView such as the Rhythm Level sample). Auto-found on this GameObject if left empty."
+        )]
         [SerializeField]
-        private ClapRouterDemoPlayer player;
+        [FormerlySerializedAs("player")]
+        private MonoBehaviour sheetSource;
 
+        [Tooltip("Horizontal inset of the sheet, in screen pixels (empty space on each side).")]
         [SerializeField]
         private float marginX = 60f;
 
+        [Tooltip("Height of the sheet band, in screen pixels.")]
         [SerializeField]
         private float sheetHeight = 140f;
 
+        [Tooltip("How long a hit/miss flash ring lingers before fading out, in seconds.")]
         [SerializeField]
         private float flashSeconds = 0.35f;
 
+        [Tooltip(
+            "Lead the playhead by one frame to cancel the ~1-frame delay before your draw reaches the display."
+        )]
         [SerializeField]
         private bool compensatePresentLatency = true;
 
+        [Tooltip(
+            "Extra lead in milliseconds to dial out remaining display/monitor latency so the bar meets the sound."
+        )]
         [SerializeField]
         private float playheadLeadMs = 0f;
 
@@ -32,32 +46,44 @@ namespace Zori.ClapRouter
         }
 
         private readonly List<HitFlash> _flashes = new List<HitFlash>();
+        private IRhythmSheetView _view;
         private Texture2D _disc;
         private Texture2D _pixel;
 
         private void Awake()
         {
-            if (player == null)
-            {
-                player = GetComponent<ClapRouterDemoPlayer>();
-            }
+            ResolveView();
             _disc = MakeDisc(64);
             _pixel = MakePixel();
         }
 
+        private void ResolveView()
+        {
+            _view = sheetSource as IRhythmSheetView;
+            if (_view == null)
+            {
+                _view = GetComponent<IRhythmSheetView>();
+                sheetSource = _view as MonoBehaviour;
+            }
+        }
+
         private void OnEnable()
         {
-            if (player != null)
+            if (_view == null)
             {
-                player.PlayerHitJudged += OnHit;
+                ResolveView();
+            }
+            if (_view != null)
+            {
+                _view.PlayerHitJudged += OnHit;
             }
         }
 
         private void OnDisable()
         {
-            if (player != null)
+            if (_view != null)
             {
-                player.PlayerHitJudged -= OnHit;
+                _view.PlayerHitJudged -= OnHit;
             }
             _flashes.Clear();
         }
@@ -77,7 +103,7 @@ namespace Zori.ClapRouter
 
         private void OnGUI()
         {
-            MusicRouterSession session = player != null ? player.Session : null;
+            MusicRouterSession session = _view?.Session;
             if (session == null || _disc == null)
             {
                 return;
@@ -88,7 +114,7 @@ namespace Zori.ClapRouter
             long audibleFrame =
                 (long)session.NowFrameInterpolated - session.OutputLatencyFrames + leadFrames;
 
-            RhythmSequence sequence = player.CurrentSheet(audibleFrame);
+            RhythmSequence sequence = _view.CurrentSheet(audibleFrame);
             if (sequence == null || sequence.Span <= 0)
             {
                 return;
@@ -161,8 +187,8 @@ namespace Zori.ClapRouter
         )
         {
             long onset = sequence.LocalOnset(i);
-            long lo = System.Math.Max(0, onset - sequence.PreWindowFrames(i));
-            long hi = System.Math.Min(span, onset + sequence.PostWindowFrames(i));
+            long lo = System.Math.Max(0, onset - sequence.PreWindowFrames);
+            long hi = System.Math.Min(span, onset + sequence.PostWindowFrames);
             float x0 = left + width * (lo / (float)span);
             float x1 = left + width * (hi / (float)span);
             DrawRect(x0, centerY - 30f, x1 - x0, 60f, new Color(0.3f, 1f, 0.45f, 0.10f));
